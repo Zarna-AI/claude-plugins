@@ -8,27 +8,49 @@ Enhanced security review plugin for Claude Code that builds on top of the built-
 - **Remediation tracking** - Track status of findings (open, in-progress, fixed)
 - **Slack integration** - Post scan summaries and reports to your team channel (more integrations coming)
 
-## Installation
+## Team Setup
 
-### For your team (from git repo)
+Complete setup for new team members:
+
+### Step 1: Install the Plugin
+
 ```bash
-# Add the marketplace (one-time)
+# Add the Zarna plugins marketplace (one-time)
 claude plugin marketplace add https://github.com/Zarna-AI/claude-plugins
 
-# Install the plugin
-claude plugin install security-scan
+# Install the plugin for this project
+claude plugin install security-scan --scope project
 ```
 
-### For local development
+### Step 2: Set Up Slack Notifications (Optional but Recommended)
+
 ```bash
-claude --plugin-dir /path/to/claude-plugins/security-scan
+# Install direnv (manages environment variables per directory)
+brew install direnv
+
+# Add direnv hook to your shell
+# For zsh (default on macOS):
+echo 'eval "$(direnv hook zsh)"' >> ~/.zshrc
+source ~/.zshrc
+
+# For bash:
+echo 'eval "$(direnv hook bash)"' >> ~/.bashrc
+source ~/.bashrc
+
+# Create .envrc in your project root (already gitignored)
+cd /path/to/your/project
+echo 'export SECURITY_SLACK_WEBHOOK="https://hooks.slack.com/services/YOUR/WEBHOOK/URL"' > .envrc
+
+# Allow direnv to load the file
+direnv allow
 ```
 
-## Setup
+**Note:** Get the Slack webhook URL from your team lead or create one at [Slack Incoming Webhooks](https://api.slack.com/messaging/webhooks).
 
-Run the setup command on first use:
+### Step 3: Run Initial Setup (First Team Member Only)
 
-```
+```bash
+# Start Claude Code and run:
 /security-setup
 ```
 
@@ -36,10 +58,16 @@ This will:
 1. Auto-detect your tech stack
 2. Configure compliance targets
 3. Set up report storage location
-4. Configure Slack notifications (optional)
+4. Configure Slack notifications
 5. Create the directory structure and team config
 
-**Note:** Only one team member needs to run setup. The config is committed to the repo, so everyone else gets it automatically.
+**Note:** Only one team member needs to run `/security-setup`. The config is committed to the repo, so everyone else gets it automatically.
+
+### For Local Development
+
+```bash
+claude --plugin-dir /path/to/claude-plugins/security-scan
+```
 
 ## Commands
 
