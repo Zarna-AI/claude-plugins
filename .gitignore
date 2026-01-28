@@ -1,0 +1,13 @@
+# Local settings
+*.local.md
+.env
+.envrc
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
