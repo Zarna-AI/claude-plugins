@@ -6,14 +6,14 @@ Shared plugins for Claude Code.
 
 | Plugin | Description | Install |
 |--------|-------------|---------|
-| [security-scan](./security-scan) | Security review with stack-specific context, compliance tracking, and Slack integration | `claude plugins add https://github.com/your-org/claude-plugins/security-scan` |
+| [security-scan](./security-scan) | Security review with stack-specific context, compliance tracking, and Slack integration | `claude plugins add https://github.com/Zarna-AI/claude-plugins/security-scan` |
 
 ## Installation
 
 Install individual plugins using the subdirectory path:
 
 ```bash
-claude plugins add https://github.com/your-org/claude-plugins/<plugin-name>
+claude plugins add https://github.com/Zarna-AI/claude-plugins/<plugin-name>
 ```
 
 ## For Team Members
