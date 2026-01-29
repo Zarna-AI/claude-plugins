@@ -1,12 +1,20 @@
 ---
 description: Run enhanced security review with stack-specific context and compliance tracking
 argument-hint: [--area <area>] [--no-save] [--no-slack]
-allowed-tools: Read, Glob, Grep, Bash, Write, Task
+allowed-tools: Read, Glob, Grep, Bash, Write, Skill
 ---
 
 # Enhanced Security Review
 
-This command loads all security context and invokes the security-scanner agent to find NEW vulnerabilities.
+This command enhances Claude's built-in security review with project-specific context:
+- Stack-specific vulnerability patterns (FastAPI, Next.js, Supabase, etc.)
+- Compliance requirements (SOC 2, GDPR, ISO 27001)
+- Known issues from pentests, past scans, and remediation tracker
+
+The result is a comprehensive security report that:
+1. **Finds NEW vulnerabilities** not previously identified
+2. **Highlights unresolved known issues** as reminders (without re-scanning them)
+3. **Tracks remediation progress** by checking if known issues have been fixed
 
 ## Step 1: Parse Arguments
 
@@ -104,83 +112,172 @@ Read ALL files found. These contain findings from:
 
 → `EXTERNAL_FINDINGS`
 
-## Step 6: Invoke Security Scanner Agent
+## Step 6: Run Security Review with Loaded Context
 
-Use Task tool with `subagent_type: security-scan:security-scanner`
+Now that all context is loaded, perform Claude's built-in security review enhanced with the project-specific context.
 
-**Build the prompt with ALL loaded context:**
+### 6a. Prepare Context Summary
+
+Before running the review, summarize what you've loaded:
 
 ```
-# Security Scan Request
+CONTEXT LOADED FOR SECURITY REVIEW:
+- Stack patterns: {list technologies}
+- Compliance frameworks: {list frameworks}
+- Known issues to skip: {count from remediation tracker + external assessments}
+- Past scan reports reviewed: {count}
+```
 
-## Your Mission
-Find NEW security vulnerabilities. We're providing you with everything that's already known - don't re-report those. Focus your efforts on discovering issues that haven't been found yet.
+### 6b. Build Known Issues List
 
-## Scan Configuration
-- Type: {full | targeted: <area>}
-- Save report to: {reports_path}
-- Date: {current date}
+From all loaded context, build a list of known issues:
 
----
+| Source | Issues | Action |
+|--------|--------|--------|
+| Remediation Tracker - Open | {list IDs and descriptions} | Don't re-scan, but HIGHLIGHT in report as unresolved |
+| Remediation Tracker - In Progress | {list IDs and descriptions} | Don't re-scan, but HIGHLIGHT in report as unresolved |
+| Remediation Tracker - Accepted Risk | {list IDs and descriptions} | Don't re-scan, don't highlight (team accepted) |
+| External Pentests | {list findings} | Don't re-scan, but HIGHLIGHT in report as unresolved |
+| External Compliance Audits | {list findings} | Don't re-scan, but HIGHLIGHT in report as unresolved |
 
-## KNOWN ISSUES - DO NOT RE-REPORT THESE
+**Key distinction:**
+- **Don't re-scan** = Don't spend time looking for these issues again
+- **Highlight in report** = Include them in the "Unresolved Known Issues" section as reminders
 
-The following issues are already tracked. Skip them and focus on finding NEW problems.
+### 6c. Invoke Built-in Security Review
 
-### From Remediation Tracker
+Use the **Skill tool** to invoke Claude's built-in `/security-review` command:
 
-{REMEDIATION_STATUS}
+```
+Skill: security-review
+```
 
-**Instructions:**
-- "Open" items → Already known, don't re-report
-- "In Progress" items → Being fixed, don't re-report
-- "Accepted Risk" items → Team decision, NEVER flag these
-- "Fixed" items → Can optionally verify fix is solid
+The built-in command will run with all the context you've loaded (stack patterns, compliance requirements, known issues) available in the conversation.
 
-### From Past Security Scans
+**IMPORTANT:** Before invoking, remind yourself of the context:
 
-{PAST_SCAN_FINDINGS}
+> I have loaded the following context for this security review:
+> - Stack patterns: {list from Step 3}
+> - Compliance requirements: {list from Step 4}
+> - Known issues to skip (but highlight as reminders): {count from Step 5}
+>
+> When running the security review:
+> 1. Apply the stack-specific vulnerability patterns I loaded
+> 2. Check compliance requirements I loaded
+> 3. Don't re-report known issues, but include them in "Unresolved Known Issues" section
+> 4. Focus on finding NEW vulnerabilities
 
-### From External Assessments (Pentests, Audits)
+Then invoke: `Skill tool with skill: "security-review"`
 
-{EXTERNAL_FINDINGS}
+### 6d. Enhance Results with Loaded Context
 
----
+After the built-in security review completes, enhance the results:
 
-## STACK-SPECIFIC PATTERNS TO USE
+1. **Cross-reference findings** with known issues list
+   - If a finding matches a known issue → Note it's already tracked (don't duplicate)
+   - If a finding is NEW → Keep it in the new findings section
 
-Use these patterns when scanning. They're tailored to this project's tech stack:
+2. **Add compliance mapping** to each finding
+   - Which compliance frameworks are affected (SOC 2, GDPR, ISO 27001)?
 
-{STACK_PATTERNS}
+3. **Add stack-specific remediation** guidance from loaded patterns
 
----
+**For each NEW finding, record:**
+- Severity (Critical/High/Medium/Low/Info)
+- Area (auth, injection, secrets, crypto, validation, logic, config, deps, rce, xss)
+- Location (file:line)
+- Description
+- Evidence (code snippet)
+- Remediation steps
+- Compliance implications (if any)
 
-## COMPLIANCE REQUIREMENTS TO CHECK
+### 6e. Update Remediation Tracker
 
-Check for NEW gaps against these requirements (skip gaps already in known issues):
+After completing the review:
 
-{COMPLIANCE_REQUIREMENTS}
+1. **Add NEW findings** to "Open Findings" in `{security_path}/remediation-tracker.md`
+   - Generate IDs as `SEC-{YEAR}-{NNN}` (increment from last ID)
+   - Set Found date to today
+   - Leave Owner blank
 
----
+2. **Check if Open issues are now fixed:**
+   - For each issue in "Open Findings", check if the vulnerability still exists
+   - If FIXED → Move to "Fixed" table with today's date, Verified = Yes
 
-## Instructions
+3. **Check if In Progress issues are complete:**
+   - For each issue in "In Progress", verify if fix is deployed
+   - If FIXED → Move to "Fixed" table
 
-1. Build a "skip list" from all known issues above
-2. Scan the codebase systematically
-3. Use the stack-specific patterns provided
-4. Check compliance requirements for NEW gaps
-5. Report only NEW findings
-6. **AUTO-UPDATE TRACKER:**
-   - Add NEW findings to "Open Findings" in remediation-tracker.md
-   - Check if "Open" issues are now fixed → move to "Fixed"
-   - Check if "In Progress" issues are complete → move to "Fixed"
-   - Generate IDs as SEC-{YEAR}-{NNN}
-7. In your report, show:
-   - NEW findings discovered
-   - Known issues still open (not re-scanned, just status)
-   - Issues that were auto-moved to Fixed
-8. Save report to: {reports_path}/YYYY-MM-DD-scan.md
-9. Save updated tracker to: {security_path}/remediation-tracker.md
+### 6f. Save Report
+
+Save the security review report to: `{reports_path}/YYYY-MM-DD-scan.md`
+
+**Report Format:**
+
+```markdown
+# Security Scan Report
+
+**Date:** {today}
+**Type:** {full | targeted: <area>}
+**Context Used:** {count} stack patterns, {count} compliance frameworks, {count} known issues skipped
+
+## Executive Summary
+
+{2-3 sentences on findings}
+
+## Overall Status
+
+| Category | Critical | High | Medium | Low | Info | Total |
+|----------|----------|------|--------|-----|------|-------|
+| NEW (this scan) | X | X | X | X | X | X |
+| Known (not re-reported) | X | X | X | X | X | X |
+| **Total Open** | X | X | X | X | X | X |
+
+## New Findings
+
+### Critical
+
+#### {Title}
+- **ID:** SEC-YYYY-NNN
+- **Location:** `file:line`
+- **Description:** ...
+- **Evidence:** ```code```
+- **Remediation:** ...
+- **Compliance:** {affected frameworks}
+
+[Repeat for each finding by severity]
+
+## Unresolved Known Issues (Reminder)
+
+These issues were previously identified and remain unresolved. They are listed here as a reminder - not re-scanned.
+
+### From Internal Scans
+
+| ID | Severity | Area | Description | Days Open | Owner |
+|----|----------|------|-------------|-----------|-------|
+| {from remediation tracker Open + In Progress} |
+
+### From External Assessments
+
+| Source | ID | Severity | Description | Status |
+|--------|-----|----------|-------------|--------|
+| {from pentest/audit reports} |
+
+**Priority Reminder:** {Call out any critical/high issues that have been open > 7 days}
+
+## Issues Auto-Fixed
+
+{List any issues moved from Open/In Progress to Fixed}
+
+## Compliance Summary
+
+### {Framework}
+- New gaps: {list or "None"}
+- Known gaps (not re-reported): {count}
+
+## Areas Verified Clean
+
+{List areas scanned with no new findings}
 ```
 
 ## Step 7: Post-Scan Actions
