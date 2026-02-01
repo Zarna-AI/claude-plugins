@@ -311,6 +311,16 @@ These issues were previously identified and remain unresolved. They are listed h
 
 {List any issues moved from Open/In Progress to Fixed}
 
+## Previously Unscanned Files (Security Debt Cleared)
+
+{If unscanned_commits had entries before this scan, list them here}
+
+Files that were committed without prior security scan - now reviewed:
+- {repo}/{file} (committed X days ago)
+- {repo}/{file} (committed X days ago)
+
+**Status:** ✓ All security debt cleared by this scan
+
 ## Compliance Summary
 
 ### {Framework}
@@ -325,6 +335,40 @@ These issues were previously identified and remain unresolved. They are listed h
 ## Step 7: Post-Scan Actions
 
 After agent completes:
+
+### Update Security State File
+
+Update `.security-state` at project root to track what was scanned:
+
+```yaml
+# .security-state
+last_scan:
+  timestamp: "YYYY-MM-DDTHH:MM:SS"
+  report: "{reports_path}/YYYY-MM-DD-scan.md"
+  repos:
+    {repo_name}:
+      scanned_files:
+        - path/to/file1.py
+        - path/to/file2.tsx
+        # List all files that were reviewed in this scan
+
+unscanned_commits: {}  # CLEARED - all repos empty after full scan
+```
+
+**Important:**
+- Clear ALL entries from `unscanned_commits` (scan covers everything)
+- Record all scanned files under each repo
+- This allows pre-commit hook to verify files were scanned
+
+### Check for Previously Unscanned Files
+
+Before clearing `unscanned_commits`, check if there were any entries:
+
+If `unscanned_commits` had files before this scan:
+- Note them in the report under "Previously Unscanned Files - Now Covered"
+- Example: "3 files were committed without prior scan - now reviewed"
+
+This provides visibility into security debt that was just cleared.
 
 ### Verify Report Saved
 Check that `{reports_path}/YYYY-MM-DD-scan.md` exists.
@@ -371,3 +415,6 @@ Present to user:
 4. Top 3 critical/high issues (new or still open)
 5. Report location
 6. Slack notification status
+7. Security state update:
+   - "✓ Scan state saved - pre-commit hooks will track new changes"
+   - If unscanned files were cleared: "✓ X files previously committed without scan - now covered"

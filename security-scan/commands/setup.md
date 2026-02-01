@@ -1,11 +1,13 @@
 ---
 description: Set up or reconfigure the security review plugin for your project
-allowed-tools: Read, Glob, Grep, Bash(ls:*, test:*, mkdir:*, which:*), Write, AskUserQuestion
+allowed-tools: Read, Glob, Grep, Bash(ls:*, test:*, mkdir:*, which:*, find:*, chmod:*, cp:*, cat:*), Write, AskUserQuestion
 ---
 
 # Security Review Plugin Setup
 
-Configure the security review plugin for this project. This creates the team configuration and directory structure.
+Configure the security review plugin for this project. This creates the team configuration, directory structure, and git hooks for commit-time security tracking.
+
+**This setup is idempotent** - it will skip steps that are already complete.
 
 ## Step 1: Check Existing Configuration
 
@@ -13,8 +15,10 @@ Search for existing configuration:
 - `**/security/team-config.md`
 - `**/zz_plans/security/team-config.md`
 
-If found, ask user:
-- "Found existing configuration at [path]. Would you like to reconfigure or keep existing settings?"
+**If found:**
+- Show: "✓ Team configuration already exists at [path]"
+- Ask: "Would you like to reconfigure or keep existing settings?"
+- If keeping existing, skip to Step 7 (hook installation)
 
 ## Step 2: Auto-Detect Technology Stack
 
@@ -117,8 +121,16 @@ Missing tools will limit some scanning capabilities but are not required."
 
 ## Step 7: Create Directory Structure
 
-Create the security directory structure at the configured path:
+**Check if directories already exist before creating:**
 
+```bash
+test -d "{security_path}" && echo "✓ Security directory exists" || mkdir -p "{security_path}"
+test -d "{security_path}/reports" && echo "✓ Reports directory exists" || mkdir -p "{security_path}/reports"
+test -d "{security_path}/external/pentests" && echo "✓ External pentests directory exists" || mkdir -p "{security_path}/external/pentests"
+test -d "{security_path}/external/compliance" && echo "✓ External compliance directory exists" || mkdir -p "{security_path}/external/compliance"
+```
+
+Target structure:
 ```
 {security_path}/
 ├── team-config.md
@@ -131,7 +143,15 @@ Create the security directory structure at the configured path:
 
 ## Step 8: Generate Configuration File
 
-Create `{security_path}/team-config.md`:
+**Check if team-config.md already exists:**
+
+```bash
+test -f "{security_path}/team-config.md" && echo "exists"
+```
+
+If exists → Show "✓ team-config.md already exists" and skip creation (unless reconfiguring).
+
+If creating, write `{security_path}/team-config.md`:
 
 ```markdown
 ---
@@ -193,7 +213,15 @@ Claude will reference these during security reviews.
 
 ## Step 9: Create Remediation Tracker
 
-Create `{security_path}/remediation-tracker.md`:
+**Check if remediation-tracker.md already exists:**
+
+```bash
+test -f "{security_path}/remediation-tracker.md" && echo "exists"
+```
+
+If exists → Show "✓ remediation-tracker.md already exists" and skip creation.
+
+If creating, write `{security_path}/remediation-tracker.md`:
 
 ```markdown
 # Security Remediation Tracker
@@ -240,7 +268,187 @@ Last Updated: [date]
 Use format: `SEC-YYYY-NNN` (e.g., SEC-2026-001)
 ```
 
-## Step 10: Summary and Next Steps
+## Step 10: Install Git Hooks
+
+Install pre-commit and post-commit hooks to track security scan status.
+
+### 10a: Find Git Repositories
+
+```bash
+find . -name ".git" -type d -maxdepth 3 2>/dev/null | sed 's/\/.git$//'
+```
+
+This returns paths like:
+- `./zarna-frontend`
+- `./zarna-backend`
+
+### 10b: Check Existing Hooks
+
+For each git repository found, check if hooks already exist:
+
+```bash
+test -f "{repo}/.git/hooks/pre-commit" && echo "pre-commit exists"
+test -f "{repo}/.git/hooks/post-commit" && echo "post-commit exists"
+```
+
+If hooks exist, check if they're ours (contain "security-scan" marker):
+```bash
+grep -q "# security-scan-hook" "{repo}/.git/hooks/pre-commit" && echo "our hook"
+```
+
+**If our hooks already installed:** Show "✓ Git hooks already installed in {repo}" and skip.
+
+**If other hooks exist:** Ask user if they want to append or skip.
+
+### 10c: Create State File
+
+Create `.security-state` at project root if it doesn't exist:
+
+```yaml
+# .security-state
+# Tracks security scan status across commits
+# DO NOT COMMIT - add to .gitignore
+
+last_scan:
+  timestamp: null
+  report: null
+  repos: {}
+
+unscanned_commits:
+  # Files committed without prior security scan
+  # Cleared when scan runs
+```
+
+### 10d: Install Pre-commit Hook
+
+For each repository, create `{repo}/.git/hooks/pre-commit`:
+
+```bash
+#!/bin/bash
+# security-scan-hook: pre-commit
+# Warns if committing files that weren't security scanned
+
+STATE_FILE="$(git rev-parse --show-toplevel)/../.security-state"
+REPO_NAME=$(basename "$(git rev-parse --show-toplevel)")
+
+# Get staged files (excluding deletions)
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=d)
+
+if [ -z "$STAGED_FILES" ]; then
+    exit 0  # No files staged
+fi
+
+# Check if state file exists
+if [ ! -f "$STATE_FILE" ]; then
+    echo ""
+    echo "⚠️  SECURITY SCAN RECOMMENDED"
+    echo "   No security scan record found."
+    echo "   Run: /security-scan:scan"
+    echo ""
+    echo "   Proceeding with commit..."
+    echo ""
+    exit 0  # Warning only, don't block
+fi
+
+# Check if files were scanned (using grep for simplicity)
+UNSCANNED=""
+for FILE in $STAGED_FILES; do
+    if ! grep -q "$FILE" "$STATE_FILE" 2>/dev/null; then
+        UNSCANNED="$UNSCANNED\n   - $FILE"
+    fi
+done
+
+if [ -n "$UNSCANNED" ]; then
+    echo ""
+    echo "⚠️  SECURITY SCAN RECOMMENDED"
+    echo "   The following files were not in the last security scan:"
+    echo -e "$UNSCANNED"
+    echo ""
+    echo "   Run: /security-scan:scan"
+    echo "   Or commit anyway (files will be tracked for next scan)"
+    echo ""
+fi
+
+exit 0  # Warning only, don't block commits
+```
+
+Make executable: `chmod +x {repo}/.git/hooks/pre-commit`
+
+### 10e: Install Post-commit Hook
+
+For each repository, create `{repo}/.git/hooks/post-commit`:
+
+```bash
+#!/bin/bash
+# security-scan-hook: post-commit
+# Tracks files committed without security scan
+
+STATE_FILE="$(git rev-parse --show-toplevel)/../.security-state"
+REPO_NAME=$(basename "$(git rev-parse --show-toplevel)")
+
+# Get files from the commit we just made
+COMMITTED_FILES=$(git diff-tree --no-commit-id --name-only -r HEAD)
+
+if [ -z "$COMMITTED_FILES" ]; then
+    exit 0
+fi
+
+# Ensure state file exists
+if [ ! -f "$STATE_FILE" ]; then
+    cat > "$STATE_FILE" << 'YAML'
+# .security-state
+last_scan:
+  timestamp: null
+  report: null
+  repos: {}
+unscanned_commits: {}
+YAML
+fi
+
+# Check which files were NOT in last scan and add to unscanned_commits
+for FILE in $COMMITTED_FILES; do
+    if ! grep -q "$FILE" "$STATE_FILE" 2>/dev/null; then
+        # Add to unscanned list if not already there (deduplication)
+        if ! grep -q "^  - $REPO_NAME/$FILE$" "$STATE_FILE" 2>/dev/null; then
+            # Append to unscanned_commits section
+            # Using a simple marker-based approach
+            sed -i.bak "/^unscanned_commits:/a\\
+\\ \\ $REPO_NAME:\\
+\\ \\ \\ \\ - $FILE" "$STATE_FILE" 2>/dev/null || true
+        fi
+    fi
+done
+
+# Clear this repo from last_scan.repos (scan is now stale for committed files)
+# The scan.md command will rebuild this when run
+
+exit 0
+```
+
+Make executable: `chmod +x {repo}/.git/hooks/post-commit`
+
+### 10f: Update .gitignore
+
+Check if `.security-state` is in `.gitignore`:
+
+```bash
+grep -q "\.security-state" .gitignore && echo "already ignored"
+```
+
+If not present, append:
+```
+# Security scan tracking (local only)
+.security-state
+```
+
+### 10g: Report Installation Status
+
+For each repo, report:
+- "✓ Installed pre-commit hook in {repo}"
+- "✓ Installed post-commit hook in {repo}"
+- Or "✓ Hooks already installed in {repo}" if skipped
+
+## Step 11: Summary and Next Steps
 
 Present summary:
 
@@ -252,22 +460,30 @@ Present summary:
 - Compliance: [list]
 - Slack: [configured/not configured]
 
-**Created files:**
-- [security_path]/team-config.md
-- [security_path]/remediation-tracker.md
-- [security_path]/reports/ (directory)
-- [security_path]/external/pentests/ (directory)
-- [security_path]/external/compliance/ (directory)
+**Created/verified:**
+- ✓ [security_path]/team-config.md
+- ✓ [security_path]/remediation-tracker.md
+- ✓ [security_path]/reports/ (directory)
+- ✓ [security_path]/external/pentests/ (directory)
+- ✓ [security_path]/external/compliance/ (directory)
+- ✓ .security-state (local tracking file)
+- ✓ Git hooks installed in [list repos]
+
+**Git Hook Behavior:**
+- **Pre-commit:** Warns if files weren't security scanned (non-blocking)
+- **Post-commit:** Tracks files committed without scan for next review
+- **After scan:** Clears tracking, fresh start
 
 **Next steps:**
 1. Commit the team-config.md and remediation-tracker.md files
-2. Run `/security-review` to conduct your first scan
+2. Run `/security-scan:scan` to conduct your first scan
 3. If you have existing pentest reports, place them in `external/pentests/`
 4. Set SECURITY_SLACK_WEBHOOK environment variable if using Slack
 
 **For team members:**
-- They will get the configuration automatically when pulling
-- They should set the SECURITY_SLACK_WEBHOOK env var if using Slack notifications"
+- Run `/security-scan:setup` once to install git hooks locally
+- They will get the configuration (team-config.md) automatically when pulling
+- Git hooks must be installed per-machine (not shared via git)"
 
 ## Reconfiguration
 
